@@ -1,6 +1,11 @@
 import React from 'react';
-import Button from 'react-bootstrap/Button';
+import { Button, Image, Navbar, Nav, Form} from 'react-bootstrap';
 import './App.css';
+import { BrowserRouter as Router, Route, NavLink } from "react-router-dom";
+import MicSettings from './MicSettings'
+import Conversation from './Conversation'
+import SpeechSettings from './SpeechSettings'
+import Harker from './Harker'
 
 // https://medium.com/@bryanjenningz/how-to-record-and-play-audio-in-javascript-faa1b2b3e49b
 // https://developer.mozilla.org/en-US/docs/Web/API/MediaStream_Recording_API/Using_the_MediaStream_Recording_API
@@ -10,21 +15,34 @@ import './App.css';
 
 
 class App extends React.Component {
+
   constructor(props) {
     super(props);
 
     const loc = window.location;
-    //const wsUrl = (loc.protocol === "https:" ? "wss:" : "ws:")
-    //  + "//" + loc.host + "/audioBlob"
-    const wsUrl = "ws://localhost:8080/audioBlob";
+    const wsUrl = loc.host === "localhost" ? "ws://localhost:8080/audioBlob" : "wss://" + loc.host + "/audioBlob";
+    console.log("wsUrl", wsUrl);
 
-    console.log(wsUrl);
     this.state = {
+      wsUrl: wsUrl,
       isRecording: false,
+      isSpeaking: false,
+      devices:[],
+      selectedDevice: "default",
       audioChunks:[],
-      socket: new WebSocket(wsUrl),
+      results:[],
+      useOpus: false,
+      ws: null,
+
+      idToken: null,
+      profile: {},
+
+      fftSize: 32,
+      minDecibels: -50,
+      maxDecibels: -30,
+      smoothingTimeConstant: 0.85,
+
     };
-    console.log("socket readyState", this.state.socket.readyState);
     this.dataAvailable = this.dataAvailable.bind(this);
     this.textDataAvailable = this.textDataAvailable.bind(this);
     this.startRec = this.startRec.bind(this);
@@ -34,7 +52,48 @@ class App extends React.Component {
     this.stopRec2 = this.stopRec2.bind(this);
     this.dataAvailable2 = this.dataAvailable2.bind(this);
 
-    this.state.socket.addEventListener('message', this.textDataAvailable);
+    this.micSettings = React.createRef();
+
+    this.resultSeq = 100;
+  }
+
+  wsConnect() {
+    const ws = new WebSocket(this.state.wsUrl + "?id_token=" + this.state.idToken);
+    ws.onopen = ev => {
+      this.setState({ws: ws});
+    };
+    ws.onmessage = ev => {
+      const message = JSON.parse(ev.data);
+
+      // Set up sequence number for result
+      if (message.results[0].isFinal) {
+        message.results[0].seq = this.resultSeq++;
+      } else {
+        message.results.forEach((result,i) => result.seq = this.resultSeq + i);
+      }
+
+      console.log("onmessage", message);
+
+      // Keep only the final messages in the state
+      // and 1 interim result from the message
+      this.setState(state => ({
+        results: [...state.results.filter(result => result.isFinal), ...message.results]
+      }));
+
+
+     };
+    ws.onclose = this.textDataAvailable;
+  }
+
+  wsDisconnect() {
+    if (this.state.ws) {
+      this.state.ws.close();
+      this.setState({ws: null});
+    }
+  }
+
+  setProp(propName, value) {
+    this.setState({[propName]: value});
   }
 
   textDataAvailable(event) {
@@ -55,38 +114,8 @@ class App extends React.Component {
     }));
   }
 
-  startRec2() {
 
-      const s = window.Recorder.isRecordingSupported();
-      console.log("Supported ", s);
-      const mediaRecorder = new window.Recorder({
-        numberOfChannels:1,
-        bitRate:16000,
-        encoderSampleRate:16000,
-        originalSampleRateOverride:16000,
-        encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
-        //streamPages: true,
-
-      })
-      console.log("mediaRecorder", mediaRecorder);
-
-      mediaRecorder.start();
-      mediaRecorder.ondataavailable = this.dataAvailable2;
-      mediaRecorder.onstart = () => {
-        console.log("Recording is started");
-      }
-      mediaRecorder.onstop = () => {
-        console.log("Recording is stopped");
-      }
-      mediaRecorder.onstreamerror = (e) => {
-        console.err("Err encountered", e);
-      }
-      //mediaRecorder.ondataavailable = (typedArray) => {
-      //  console.log("ondataavailable", typedArray);
-      //}
-      this.setState({mediaRecorder, audioChunks:[], isRecording:true});
-  }
-
+  // recording with WebAudio  MediaRecorder
   startRec() {
     // sampling Rate doesn't work when using audio/webm; codecs=opus
     //const audioCtx = new AudioContext({sampleRate: 16000});
@@ -113,20 +142,6 @@ class App extends React.Component {
     }); 
   }
 
-  stopRec2() {
-    this.state.mediaRecorder.stop();
-    this.setState({isRecording:false});
-    setTimeout(() => {
-      // Blob constructor doesn't do any encoding, does it?
-      //const blob = new Blob(this.state.audioChunks, { type : 'audio/ogg; codecs=opus' });
-     //const blob = new Blob(this.state.audioChunks, { type : 'audio/mpeg-3' });
-     console.log("audioChunks", this.state.audioChunks);
-     const blob = new Blob(this.state.audioChunks, { type : 'audio/webm' });
-     console.log("sending to backend", blob);
-     this.state.socket.send(blob);
-    }, 10);
-  }
-
   stopRec() {
     this.state.mediaRecorder.stop();
     this.state.stream.getTracks().forEach(track => track.stop());
@@ -139,29 +154,348 @@ class App extends React.Component {
      console.log("audioChunks", this.state.audioChunks);
      const blob = new Blob(this.state.audioChunks, { type : 'audio/webm' });
      console.log("sending to backend", blob);
-     this.state.socket.send(blob);
+     this.state.ws.send(blob);
     }, 10);
   }
 
+  // Recording with MediaRecorder opus-recorder which is webasm of libopus
+  startRec2() {
+      const s = window.Recorder.isRecordingSupported();
+      console.log("Supported ", s);
+      const mediaRecorder = new window.Recorder({
+        numberOfChannels:1,
+        bitRate:16000,
+        encoderSampleRate:16000,
+        originalSampleRateOverride:16000,
+        encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
+        //streamPages: true,
+
+      });
+      console.log("mediaRecorder", mediaRecorder);
+
+      mediaRecorder.start();
+      mediaRecorder.ondataavailable = this.dataAvailable2;
+      mediaRecorder.onstart = () => {
+        console.log("Recording is started");
+      };
+      mediaRecorder.onstop = () => {
+        console.log("Recording is stopped");
+      };
+      mediaRecorder.onstreamerror = (e) => {
+        console.err("Err encountered", e);
+      };
+      //mediaRecorder.ondataavailable = (typedArray) => {
+      //  console.log("ondataavailable", typedArray);
+      //}
+      this.setState({mediaRecorder, audioChunks:[], isRecording:true});
+  }
+
+  stopRec2() {
+    this.state.mediaRecorder.stop();
+    this.setState({isRecording:false});
+    setTimeout(() => {
+      // Blob constructor doesn't do any encoding, does it?
+      //const blob = new Blob(this.state.audioChunks, { type : 'audio/ogg; codecs=opus' });
+     //const blob = new Blob(this.state.audioChunks, { type : 'audio/mpeg-3' });
+     console.log("audioChunks", this.state.audioChunks);
+     const blob = new Blob(this.state.audioChunks, { type : 'audio/webm' });
+     console.log("sending to backend", blob);
+     this.state.ws.send(blob);
+    }, 10);
+  }
+
+  startSpeech() {
+    if (this.state.useOpus) {
+      this.opusRecorder.start();
+      this.opusRecorder.ondataavailable = (data) => {
+        console.log("sending data " , data);
+        if (this.state.ws) {
+          this.state.ws.send(data);
+        }
+      };
+      this.opusRecorder.onstart = () => {
+        console.log("OpusRecording is started");
+      };
+      this.opusRecorder.onstop = () => {
+        console.log("OpusRecording is stopped");
+      };
+      this.opusRecorder.onstreamerror = (e) => {
+        console.log("OpusRecoding Err encountered", e);
+      };
+    }
+    this.chunkIndex = 0;
+    const cmd = {oper:"start", useOpus:this.state.useOpus};
+    if (this.state.ws) {
+      this.state.ws.send(JSON.stringify(cmd));
+      if (!this.state.useOpus) {
+        console.log("sending (lastBuffer) data " + this.chunkIndex++ , this.lastBuffer);
+        this.state.ws.send(this.lastBuffer);
+      }
+    }
+    this.isSpeaking = true;
+    this.setState({isSpeaking: true});
+  }
+
+  stopSpeech() {
+    this.isSpeaking = false;
+    if (this.state.useOpus) {
+      this.opusRecorder.stop();
+    }
+    // tell the backend we are ending, then close the connection
+    const cmd = {oper:"end"};
+    if (this.state.ws) {
+      this.state.ws.send(JSON.stringify(cmd));
+    }
+    this.setState({isSpeaking: false});
+
+  }
+
+  // https://github.com/muaz-khan/WebRTC-Experiment/blob/master/hark/hark.js
+  // https://github.com/mdn/voice-change-o-matic/blob/gh-pages/scripts/app.js#L128-L205
+  // https://www.twilio.com/blog/audio-visualisation-web-audio-api--react
+
+  // Recording to analyser node
+  startRec3() {
+    this.audioCtx = new AudioContext({sampleRate: this.state.useOpus ? 48000 : 16000});
+    //const audioCtx = new AudioContext();
+    this.analyser = this.audioCtx.createAnalyser();
+    this.analyser.fftSize = this.state.fftSize;
+    this.analyser.minDecibels = this.state.minDecibels;
+    this.analyser.maxDecibels = this.state.maxDecibels;
+    this.analyser.smoothingTimeConstant = this.state.smoothingTimeConstant;
+
+    this.chunkIndex = 0;
+
+    this.wsConnect();
+
+    // Create a line delay to give time to speech detection
+    //this.lineDelay = audioCtx.createDelay(3);
+
+    if (this.state.useOpus) {
+      const s = window.Recorder.isRecordingSupported();
+      console.log("Opus Supported ", s);
+
+      this.opusRecorder = new window.Recorder({
+        numberOfChannels:1,
+        encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
+        streamPages: true,
+      });
+
+    }
+    else {
+      this.scriptProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
+
+    }
+
+    //console.log("selectedDevice", this.state.selectedDevice);
+    navigator.mediaDevices.getUserMedia({ audio:{ deviceId:this.state.selectedDevice} })
+    .then(stream => {
+      this.stream = stream;
+      //console.log("Number of tracks", stream.getTracks().length);
+      // create a source from the selected microphone
+      this.source = this.audioCtx.createMediaStreamSource(this.stream);
+
+      // connect the source to the analyser and to the destination
+      this.source.connect(this.analyser);
+
+      if (this.state.useOpus) {
+      } else {
+        //source.connect(this.lineDelay);
+        //this.lineDelay.connect(this.scriptProcessor)
+        this.source.connect(this.scriptProcessor);
+
+        this.scriptProcessor.connect(this.audioCtx.destination);
+        this.scriptProcessor.onaudioprocess = (event) => {
+
+          // we're only using one audio channel here...
+          let leftChannel = event.inputBuffer.getChannelData(0);
+
+          // Harker speech detection require is set to 50ms, so we need to buffer 100ms of speech.
+          // at 16K sample rate, we need to keep 1600 samples ,
+          // since we used a buffer size of 2048, just one additional buffer is fine
+          const data = this.convertFloat32ToInt16(leftChannel);
+          if (this.state.ws && this.isSpeaking) {
+            console.log("sending data " + this.chunkIndex++ , data);
+            this.state.ws.send(data);
+            this.lastBuffer = null;
+          } else {
+            this.lastBuffer = data;
+          }
+        };
+
+      }
+
+      this.harker = new Harker(this.audioCtx, this.source, this.stream, {});
+      this.harker.on("speaking", () => this.startSpeech());
+      this.harker.on("stopped_speaking", () => this.stopSpeech());
+
+
+      // create MediaRecorder at the destination
+      //const mediaRecorder = new MediaRecorder(stream, {mimeType:"audio/webm; codecs=pcm" });
+      //const dest = audioCtx.createMediaStreamDestination();
+      //source.connect(dest);
+      //const mediaRecorder = new MediaRecorder(dest.stream);
+      // use timeSlice of 100ms
+      //mediaRecorder.start(100);
+      //mediaRecorder.addEventListener("dataavailable", this.dataAvailable);
+
+      //const cmd = {oper:"start", useOpus:this.state.useOpus};
+      //this.wsConnect(cmd);
+
+      // Start the canvasAnimation if the micSettings tab is active
+      const comp = this.micSettings.current;
+      if (comp) {
+        comp.animReq =  window.requestAnimationFrame(comp.canvasDraw.bind(comp));
+      }
+      this.setState({
+        audioCtx: this.audioCtx,
+        stream : this.stream,
+        analyser :this.analyser,
+        harker:this.harker,
+        isRecording:true});
+
+    }); 
+  }
+
+
+
+  stopRec3() {
+
+    // Stop the harker
+    this.state.harker.stop();
+
+    // Disconnect analyser
+    this.source.disconnect(this.analyser);
+
+    // Disconnect scriptProcessor
+    if (this.state.useOpus) {
+    } else {
+      this.source.disconnect(this.scriptProcessor);
+      this.scriptProcessor.disconnect(this.audioCtx.destination);
+    }
+    this.audioCtx.close();
+
+    this.wsDisconnect();
+
+    // tell the microphone device to stop
+    this.state.stream.getTracks().forEach(track => track.stop());
+    window.clearInterval(this.state.interval);
+
+    // tell the canvas animation to stop
+    const comp = this.micSettings.current;
+    console.log("comp", comp);
+    if (comp && comp.animReq) {
+      window.cancelAnimationFrame(comp.animReq);
+    }
+    this.setState({isRecording:false});
+  }
+
+
+  // Audio is  present in FLoat32 samples, need to convert to Int16 for backend
+  convertFloat32ToInt16 (buffer) {
+    let l = buffer.length;
+    let buf = new Int16Array(l);
+    while (l >= 0) {
+      buf[l] = Math.min(1, buffer[l]) * 0x7FFF;
+      l = l - 1;
+    }
+    return buf.buffer;
+  }
+
+  onSignIn(user) {
+    const profile = user.getBasicProfile();
+    this.setState({
+      profile: {
+        id : profile.getId(),
+        name: profile.getName(),
+        givenName: profile.getGivenName(),
+        familyName: profile.getFamilyName(),
+        imageUrl: profile.getImageUrl(),
+        email: profile.getEmail()
+      },
+      idToken: user.getAuthResponse().id_token,
+    });
+    console.log('Signed in as ' + profile.getName());
+  }
+
+  componentDidMount() {
+    console.log("rendering button");
+
+    /*
+    window.gapi.load('auth2', function() {
+      window.gapi.auth2.init({
+        client_id: '480181438061-hthmagt8t2cn56l8d08ek4e33njo9h5k.apps.googleusercontent.com',
+        scope: 'profile'
+      })
+      .then(() => {
+          const auth2 = window.gapi.auth2.getAuthInstance();
+          // Sign in the user if they are currently signed in.
+          if (auth2.isSignedIn.get() === true) {
+            auth2.signIn({prompt:"select_account"});
+          }
+          else {
+            console.log("User is not signed in");
+          }
+
+      });
+
+      */
+    window.gapi.signin2.render('my-signin2', {
+      'scope': 'profile email',
+      'width': 200,
+      'height': 50,
+      'theme': 'dark',
+      'onsuccess': this.onSignIn.bind(this)
+    });
+
+  }
+
   render() {
-    return ( 
-      <div>
-      <h2>Speech Recording</h2>
-      <Button
-        variant="primary"
-        disabled={this.state.isRecording}
-        onClick={this.startRec2}
-      >
-        Record
-      </Button>
-      <Button
-        variant="primary"
-        disabled={!this.state.isRecording}
-        onClick={this.stopRec2}
-      >
-        Stop
-      </Button>
-      </div>
+    if (!this.state.idToken) {
+      return <div id="my-signin2"/>;
+    }
+    return (
+    <Router>
+      <Navbar bg="dark" variant="dark">
+        <Nav className="mr-auto">
+          <NavLink exact className="nav-link" to="/">Conversation</NavLink>
+          <NavLink className="nav-link" to="/mic">Mic Settings</NavLink>
+          <NavLink className="nav-link" to="/speech">Speech Settings</NavLink>
+       </Nav>
+        <Form inline>
+          <Button
+            variant={this.state.isRecording ? "danger" : "success"}
+            onClick={this.state.isRecording ? this.stopRec3.bind(this) : this.startRec3.bind(this)}
+          >
+            <span className={this.state.isSpeaking ? "spinner-grow spinner-grow-sm" : ""} role="status" aria-hidden="true"/>
+
+            {this.state.isRecording ? "Stop Recording" : "Start Recording"}
+
+          </Button>
+          <Image src={this.state.profile.imageUrl} roundedCircle className="ml-2" style={{height:"2.4rem"}}/>
+        </Form>
+      </Navbar>
+      <Route path="/" exact render={routeProps => (
+        <Conversation
+          isRecording={this.state.isRecording}
+          results={this.state.results}
+        />
+      )}/>
+      <Route path="/mic/"  render={routeProps => (
+        <MicSettings
+          ref={this.micSettings}
+          analyser={this.state.analyser}
+          isRecording={this.state.isRecording}
+          selectedDevice={this.state.selectedDevice}
+          fftSize={this.state.fftSize}
+          minDecibels={this.state.minDecibels}
+          maxDecibels={this.state.maxDecibels}
+          smoothingTimeConstant={this.state.smoothingTimeConstant}
+          setProp={this.setProp.bind(this)}
+        />
+      )}/>
+      <Route path="/speech/" component={SpeechSettings} />
+   </Router>
     );
   }
 }

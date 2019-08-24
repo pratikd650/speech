@@ -1,4 +1,17 @@
+html {
+  font-size: 0.8rem;
+}
+
 .App {
   text-align: center;
 }
 
+.msg-interim {
+  background-color: lightsalmon;
+  margin-right: 0.1em;
+}
+
+.msg-final {
+  margin-right: 0.1em;
+  display: block;
+}

@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "Sachi Speech",
+  "name": "Speech to Text",
   "icons": [
     {
       "src": "favicon.ico",

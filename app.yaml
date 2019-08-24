@@ -1,0 +1,35 @@
+runtime: nodejs
+env: flex
+
+# Use only a single instance, so that this local-memory-only chat app will work
+# consistently with multiple users. To work across multiple instances, an
+# extra-instance messaging system or data store would be needed.
+manual_scaling:
+  instances: 1
+
+env_variables:
+  GOOGLE_APPLICATION_CREDENTIALS: "Speech-8dd6e8fb8a6d.json"
+
+handlers:
+ - url: /
+   static_files: build/index.html
+   upload: build/index.html
+
+ - url: /favicon\.ico
+   static_files: build/favicon.ico
+   upload: build/favicon.ico
+
+ - url: /manifest\.json
+   static_files: build/manifest.json
+   upload: build/manifest.json
+
+ - url: /static
+   static_dir: build/static
+
+ - url: /opus-recorder
+   static_dir: build/opus-recorder
+
+ - url: /.*
+   secure: always
+   redirect_http_response_code: 301
+   script: auto
