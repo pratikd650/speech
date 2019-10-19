@@ -16,12 +16,12 @@ class Stream {
    * @param wss - the websocket server object - there is only one server object
    */
   constructor(ws, wss) {
-    console.log("Creating stream");
     this.recognizeStream = null;
     this.ws = ws; // store the websocket so we can send back results
     this.wss = wss; // use it to get a list of all client
     this.startStream = this.startStream.bind(this);
     this.speechCallback = this.speechCallback.bind(this);
+    ws.my_log("INFO", "Creating stream");
   }
 
   getRecognizeStream() {
@@ -69,6 +69,10 @@ class Stream {
   endStream() {
     if (this.recognizeStream) {
 
+      this.ws.my_log("INFO", "Closing stream");
+
+      this.recognizeStream.end();
+
       // Null out and create a copy of the recognize stream,
       // the original stream cannot be written to any more
       // however this stream may be still replying
@@ -76,7 +80,6 @@ class Stream {
       this.recognizeStream = null;
       //const fd1 = this.fd;
 
-      recognizeStream1.end();
       //fs.closeSync(fd1);
 
       // after ending the stream, the server may be still replying back, wait for 2 seconds
