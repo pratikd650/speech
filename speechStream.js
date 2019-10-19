@@ -21,7 +21,7 @@ class Stream {
     this.wss = wss; // use it to get a list of all client
     this.startStream = this.startStream.bind(this);
     this.speechCallback = this.speechCallback.bind(this);
-    ws.my_log("INFO", "Creating stream");
+    console.log("Creating speech stream");
   }
 
   getRecognizeStream() {
@@ -50,6 +50,8 @@ class Stream {
 
     //this.fd = fs.openSync("/tmp/audio", "w");
 
+    this.ws.my_log("INFO", "Starting recognize stream");
+
     // Clear current audioInput
     // Initiate (Reinitiate) a recognize stream
     this.recognizeStream = client
@@ -69,7 +71,7 @@ class Stream {
   endStream() {
     if (this.recognizeStream) {
 
-      this.ws.my_log("INFO", "Closing stream");
+      this.ws.my_log("INFO", "Closing recognize stream");
 
       this.recognizeStream.end();
 
@@ -109,7 +111,7 @@ class Stream {
   speechCallback(data)  {
     const cmd = {
       oper:"result",
-      clientId: this.ws.clientId,
+      clientId: this.ws.my_clientId,
       result: data,
     };
     // Send trasncription data to all clients
