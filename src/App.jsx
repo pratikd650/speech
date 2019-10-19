@@ -20,7 +20,8 @@ class App extends React.Component {
     super(props);
 
     const loc = window.location;
-    const wsUrl = loc.host === "localhost" ? "ws://localhost:8080/audioBlob" : "wss://" + loc.host + "/audioBlob";
+    console.log(loc.host);
+    const wsUrl = loc.host === "localhost:3000" ? "ws://localhost:8080/audioBlob" : "wss://" + loc.host + "/audioBlob";
     console.log("wsUrl", wsUrl);
 
     this.state = {
@@ -31,8 +32,13 @@ class App extends React.Component {
       selectedDevice: "default",
       audioChunks:[],
       results:[],
+      clients: new Map(),
+      interim: new Map(),
+
       useOpus: false,
       ws: null,
+      phrases:[],
+      phrasesChanged: false,
 
       idToken: null,
       profile: {},
@@ -53,8 +59,6 @@ class App extends React.Component {
     this.dataAvailable2 = this.dataAvailable2.bind(this);
 
     this.micSettings = React.createRef();
-
-    this.resultSeq = 100;
   }
 
   wsConnect() {
@@ -62,27 +66,60 @@ class App extends React.Component {
     ws.onopen = ev => {
       this.setState({ws: ws});
     };
-    ws.onmessage = ev => {
-      const message = JSON.parse(ev.data);
+    ws.onclose = ev => {
+      console.log("Server closed connection");
+      this.setState({ws: null});
 
-      // Set up sequence number for result
-      if (message.results[0].isFinal) {
-        message.results[0].seq = this.resultSeq++;
-      } else {
-        message.results.forEach((result,i) => result.seq = this.resultSeq + i);
+    };
+    ws.onmessage = ev => {
+      const cmd = JSON.parse(ev.data);
+      console.log("onmessage", cmd);
+
+      // Is the message about list of current connected clients
+      if (cmd.oper === "clients") {
+        this.clientId = cmd.clientId;
+        console.log("clients", cmd.clients);
+
+        this.setState(state => {
+          const clients = new Map(state.clients);
+          cmd.clients.forEach(client => clients.set(client.clientId, client.openIdToken));
+          console.log("client Map", clients);
+          return {clientId: cmd.clientId, clients: clients}
+        });
+      }
+      // Is the message about the phrases  ?
+      else if (cmd.oper === "phrases") {
+        this.setState({phrases: cmd.phrases ? cmd.phrases : []});
+      }
+      // Is the message about the transcription of one client ?
+      else if (cmd.oper === "result") {
+        const result = cmd.result;
+
+        this.setState(state => {
+
+          const interim = new Map(this.state.interim); // clone the interim
+          const results = this.state.results.slice(); // clone the results
+
+          // If we don't have a result entry for storing interim result create one
+          if (!interim.has(cmd.clientId)) {
+            interim.set(cmd.clientId, results.length);
+            results.push({clientId: cmd.clientId});
+          }
+
+          // save the results whether it is interim or final into this array
+          results[interim.get(cmd.clientId)] = {clientId: cmd.clientId, result: result.results[0]};
+
+          // if this is a final result, clear out the interim index for this client
+          // Is this an interim result
+          if (result.results[0].isFinal) {
+            interim.delete(cmd.clientId);
+          }
+          return { interim: interim, results: results };
+        });
+
       }
 
-      console.log("onmessage", message);
-
-      // Keep only the final messages in the state
-      // and 1 interim result from the message
-      this.setState(state => ({
-        results: [...state.results.filter(result => result.isFinal), ...message.results]
-      }));
-
-
      };
-    ws.onclose = this.textDataAvailable;
   }
 
   wsDisconnect() {
@@ -164,9 +201,8 @@ class App extends React.Component {
       console.log("Supported ", s);
       const mediaRecorder = new window.Recorder({
         numberOfChannels:1,
-        bitRate:16000,
-        encoderSampleRate:16000,
-        originalSampleRateOverride:16000,
+        encoderSampleRate:48000,
+        originalSampleRateOverride:48000,
         encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
         //streamPages: true,
 
@@ -182,7 +218,7 @@ class App extends React.Component {
         console.log("Recording is stopped");
       };
       mediaRecorder.onstreamerror = (e) => {
-        console.err("Err encountered", e);
+        console.error("Err encountered", e);
       };
       //mediaRecorder.ondataavailable = (typedArray) => {
       //  console.log("ondataavailable", typedArray);
@@ -266,8 +302,6 @@ class App extends React.Component {
 
     this.chunkIndex = 0;
 
-    this.wsConnect();
-
     // Create a line delay to give time to speech detection
     //this.lineDelay = audioCtx.createDelay(3);
 
@@ -279,6 +313,8 @@ class App extends React.Component {
         numberOfChannels:1,
         encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
         streamPages: true,
+        encoderSampleRate:48000,
+        originalSampleRateOverride: 48000,
       });
 
     }
@@ -358,6 +394,9 @@ class App extends React.Component {
   }
 
 
+  savePhrases() {
+    this.state.ws.send(JSON.stringify({oper:"updatePhrases", phrases: this.state.phrases}))
+  }
 
   stopRec3() {
 
@@ -374,8 +413,6 @@ class App extends React.Component {
       this.scriptProcessor.disconnect(this.audioCtx.destination);
     }
     this.audioCtx.close();
-
-    this.wsDisconnect();
 
     // tell the microphone device to stop
     this.state.stream.getTracks().forEach(track => track.stop());
@@ -414,8 +451,11 @@ class App extends React.Component {
         email: profile.getEmail()
       },
       idToken: user.getAuthResponse().id_token,
+    }, () => {
+      console.log('Signed in as ' + profile.getName());
+      this.wsConnect();
     });
-    console.log('Signed in as ' + profile.getName());
+    // Note: we never call wsDisconnect
   }
 
   componentDidMount() {
@@ -478,6 +518,7 @@ class App extends React.Component {
       <Route path="/" exact render={routeProps => (
         <Conversation
           isRecording={this.state.isRecording}
+          clients={this.state.clients}
           results={this.state.results}
         />
       )}/>
@@ -494,8 +535,18 @@ class App extends React.Component {
           setProp={this.setProp.bind(this)}
         />
       )}/>
-      <Route path="/speech/" component={SpeechSettings} />
-   </Router>
+      <Route path="/speech/" render={routeProps => (
+        <SpeechSettings
+          phrases={this.state.phrases}
+          phrasesChanged={this.state.phrasesChanged}
+          updatePhrases={phrases => this.setState({phrases: phrases, phrasesChanged: true})}
+          savePhrases={() => {
+            this.savePhrases();
+            this.setState({phrasesChanged: false})
+          }}
+        />
+      )}/>
+    </Router>
     );
   }
 }

@@ -23,6 +23,7 @@ class Conversation extends React.Component {
   }
 
   render() {
+    console.log("Conversation clients", this.props.clients);
     if (this.props.results.length === 0) {
       return (
         <div>
@@ -32,11 +33,11 @@ class Conversation extends React.Component {
     return (
       <div>
         {// all messages except the last one
-          this.props.results.map(result => (
-            <span key={result.seq} ref={this.lastSpanRef} className={!result.isFinal ? "msg-interim" : "msg-final"}>
-            {result.alternatives[0].transcript}
-          </span>
-        ))}
+          this.props.results.map((r,i) => (
+            <div key={i} ref={this.lastSpanRef} className={!r.result.isFinal ? "msg-interim" : "msg-final"}>
+              <b>{this.props.clients.get(r.clientId).name} : </b> {r.result.alternatives[0].transcript}
+          </div>))
+        }
       </div>
     );
   }

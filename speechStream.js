@@ -4,16 +4,22 @@
 // Imports the Google Cloud client library
 // Currently, only v1p1beta1 contains result-end-time
 const speech = require('@google-cloud/speech').v1p1beta1;
+const WebSocket = require('ws');
 
 const client = new speech.SpeechClient();
 const fs = require('fs');
 
 class Stream {
-  constructor(ws) {
+  /**
+   *
+   * @param ws - the websocket client object - one created for each connection
+   * @param wss - the websocket server object - there is only one server object
+   */
+  constructor(ws, wss) {
     console.log("Creating stream");
     this.recognizeStream = null;
     this.ws = ws; // store the websocket so we can send back results
-
+    this.wss = wss; // use it to get a list of all client
     this.startStream = this.startStream.bind(this);
     this.speechCallback = this.speechCallback.bind(this);
   }
@@ -22,16 +28,19 @@ class Stream {
      return this.recognizeStream;
   }
 
+
+
   /*
       // convert raw pcm to wav file
       ffmpeg -f s16le -ar 16000 -ac 1 -i /tmp/audio /tmp/output.wav
 
    */
-  startStream(useOpus) {
+  startStream(useOpus, phrases) {
     const config = {
       encoding: useOpus ? 'OGG_OPUS' : 'LINEAR16',
       sampleRateHertz: useOpus ? 48000 : 16000,
       languageCode: 'en_us',
+      speechContexts: [{ phrases: phrases}],
     };
 
     const request = {
@@ -46,10 +55,11 @@ class Stream {
     this.recognizeStream = client
       .streamingRecognize(request)
       .on('error', err => {
+        this.ws.my_log("ERROR", 'API request error ', err);
         if (err.code === 11) {
           // restartStream();
         } else {
-          console.error('API request error ' + err);
+          this.ws.my_log("ERROR", 'API request error ', err);
         }
       })
       .on('data', this.speechCallback);
@@ -59,15 +69,18 @@ class Stream {
   endStream() {
     if (this.recognizeStream) {
 
+      // Null out and create a copy of the recognize stream,
+      // the original stream cannot be written to any more
+      // however this stream may be still replying
       const recognizeStream1 = this.recognizeStream;
-      // fs.closeSync(this.fd);
-      // Don't end the stream right away, wait for 1 second
-      setTimeout(() => {
-        recognizeStream1.end();
+      this.recognizeStream = null;
+      //const fd1 = this.fd;
 
-        setTimeout(() => recognizeStream1.removeListener('data', this.speechCallback), 1000);
-        //recognizeStream1 = null;
-      }, 1000);
+      recognizeStream1.end();
+      //fs.closeSync(fd1);
+
+      // after ending the stream, the server may be still replying back, wait for 2 seconds
+      setTimeout(() => recognizeStream1.removeListener('data', this.speechCallback), 2000);
 
       /*
       // DOn't remove this listener
@@ -86,12 +99,22 @@ class Stream {
       //fs.writeSync(this.fd, message);
       this.recognizeStream.write(message);
     } else {
-      console.log("got buffer of size ", message, " after recognize Stream was closed")
+      this.ws.my_log("ERROR", "got buffer of size ", message, " after recognize Stream was closed")
     }
   }
 
   speechCallback(data)  {
-    this.ws.send(JSON.stringify(data));
+    const cmd = {
+      oper:"result",
+      clientId: this.ws.clientId,
+      result: data,
+    };
+    // Send trasncription data to all clients
+    this.wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(cmd));
+      }
+    });
   };
   
 }
@@ -250,4 +273,4 @@ class InfiniteStream {
 
 module.exports = {
   Stream:Stream
-}
+};
