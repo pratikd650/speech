@@ -2,6 +2,10 @@ html {
   font-size: 0.8rem;
 }
 
+html, body {
+  height: 100%;
+}
+
 .App {
   text-align: center;
 }
@@ -13,4 +17,8 @@ html {
 
 .msg-final {
   margin-right: 0.1em;
+}
+
+.main-content {
+  overflow: auto;
 }

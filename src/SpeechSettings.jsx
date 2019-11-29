@@ -5,7 +5,7 @@ class SpeechSettings extends React.Component {
 
   render() {
     return (
-      <Form>
+      <Form className="flex-grow-1">
         <Form.Group controlId="phrases">
           <Form.Label>Phrases</Form.Label>
           <Form.Control as="textarea" rows="5" value={this.props.phrases.join("\n")}

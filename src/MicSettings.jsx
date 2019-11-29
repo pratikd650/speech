@@ -65,7 +65,7 @@ class MicSettings extends React.Component {
 
   render() {
     return (
-      <div>
+      <div className="flex-grow-1">
         <select value={this.props.selectedDevice}
                 onChange={(e) => this.props.setProp("selectedDevice", e.target.value)}>
           {this.state.devices.filter(device => device.kind === "audioinput").map(device =>

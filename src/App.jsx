@@ -33,6 +33,7 @@ class App extends React.Component {
       audioChunks:[],
       results:[],
       clients: new Map(),
+      icons: new Map(),
       interim: new Map(),
 
       useOpus: false,
@@ -83,8 +84,11 @@ class App extends React.Component {
         this.setState(state => {
           const clients = new Map(state.clients);
           cmd.clients.forEach(client => clients.set(client.clientId, client.openIdToken));
+          const icons = new Map();
+          cmd.clients.forEach(client => icons.set(client.openIdToken.given_name, client.openIdToken.picture));
           console.log("client Map", clients);
-          return {clientId: cmd.clientId, clients: clients}
+          console.log("icons Map", icons);
+          return {clientId: cmd.clientId, clients: clients, icons:icons}
         });
       }
       // Is the message about the phrases  ?
@@ -264,8 +268,12 @@ class App extends React.Component {
     if (this.state.ws) {
       this.state.ws.send(JSON.stringify(cmd));
       if (!this.state.useOpus) {
-        console.log("sending (lastBuffer) data " + this.chunkIndex++ , this.lastBuffer);
-        this.state.ws.send(this.lastBuffer);
+        this.skippedBuffers.forEach(buf => {
+          console.log("sending (lastBuffer) data " , this.chunkIndex++);
+          this.state.ws.send(buf);
+        });
+        // clear out the skipped buffers
+        this.skippedBuffers = [];
       }
     }
     this.isSpeaking = true;
@@ -299,6 +307,8 @@ class App extends React.Component {
     this.analyser.minDecibels = this.state.minDecibels;
     this.analyser.maxDecibels = this.state.maxDecibels;
     this.analyser.smoothingTimeConstant = this.state.smoothingTimeConstant;
+
+    this.skippedBuffers = [];
 
     this.chunkIndex = 0;
 
@@ -351,11 +361,16 @@ class App extends React.Component {
           // since we used a buffer size of 2048, just one additional buffer is fine
           const data = this.convertFloat32ToInt16(leftChannel);
           if (this.state.ws && this.isSpeaking) {
-            console.log("sending data " + this.chunkIndex++ , data);
+            console.log("sending data ", this.chunkIndex++);
             this.state.ws.send(data);
-            this.lastBuffer = null;
           } else {
-            this.lastBuffer = data;
+            // Accumulate 8 buffers , each buffer is of size 2048, i.e. 2048/16000 of a second  i.e 128ms
+            // so we keep last 1 second before voice detection.
+            if (this.skippedBuffers.length > 8) {
+              this.skippedBuffers.shift();
+            }
+            this.skippedBuffers.push(data);
+
           }
         };
 
@@ -546,6 +561,14 @@ class App extends React.Component {
           }}
         />
       )}/>
+      <div className="bg-dark">
+        <span className="text-white">
+          Connected:
+        </span>
+        {Array.from(this.state.icons).map(([name, icon]) =>
+            <Image src={icon} roundedCircle className="ml-2" style={{height:"2.4rem"}}/>
+        )}
+      </div>
     </Router>
     );
   }
