@@ -143,6 +143,10 @@ wss.on('connection', (ws,req) => {
         // end the stream, will not immediately end but wait for some time
         ws.my_speechStream.endStream();
       }
+      else if (cmd.oper === "ping") {
+        // periodic ping message from server
+        ws.send(JSON.stringify({oper: "pong"}));
+      }
       else if (cmd.oper === "updatePhrases") {
         phrases = cmd.phrases;
         datastore.update({key: phraseKey, data: {Value :phrases}}, (err, entity) => {

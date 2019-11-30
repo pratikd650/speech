@@ -122,8 +122,16 @@ class App extends React.Component {
         });
 
       }
+      else if (cmd.oper === "pong") {
+        console.log("Got pong reply from server");
+      }
+    };
 
-     };
+    // Set a timer for 20 seconds, so that websocket doesn't get disconnected
+    window.setInterval(() => {
+      ws.send(JSON.stringify({oper:"ping"}));
+      console.log("Sending ping");
+    }, 20000);
   }
 
   wsDisconnect() {
