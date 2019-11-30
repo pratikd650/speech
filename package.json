@@ -3,20 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@google-cloud/datastore": "^4.2.0",
-    "@google-cloud/speech": "^3.2.3",
-    "bootstrap": "^4.3.1",
+    "@google-cloud/datastore": "^4.5.2",
+    "@google-cloud/speech": "^3.4.0",
+    "bootstrap": "^4.4.1",
     "express": "^4.17.1",
-    "google-auth-library": "^5.2.0",
+    "google-auth-library": "^5.5.1",
     "moment": "^2.24.0",
     "opus-recorder": "^6.1.1",
-    "react": "^16.8.6",
-    "react-bootstrap": "^1.0.0-beta.10",
-    "react-dom": "^16.8.6",
-    "react-router-dom": "^5.0.1",
+    "react": "^16.12.0",
+    "react-bootstrap": "^1.0.0-beta.16",
+    "react-dom": "^16.12.0",
+    "react-router-dom": "^5.1.2",
     "react-scripts": "3.0.1",
     "sqlite3": "^4.1.0",
-    "ws": "^7.1.1"
+    "ws": "^7.2.0"
   },
   "proxy": "http://localhost:8080",
   "scripts": {
@@ -42,6 +42,6 @@
     ]
   },
   "engines": {
-    "node": "10.x"
+    "node": ">=10.x"
   }
 }
