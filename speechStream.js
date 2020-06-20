@@ -40,6 +40,7 @@ class Stream {
       encoding: useOpus ? 'OGG_OPUS' : 'LINEAR16',
       sampleRateHertz: useOpus ? 48000 : 16000,
       languageCode: 'en_us',
+      enableAutomaticPunctuation: true,
       speechContexts: [{ phrases: phrases}],
     };
 

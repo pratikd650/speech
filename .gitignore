@@ -7,3 +7,4 @@ public/opus-recorder/
 data.db
 .DS_Store
 rsync.txt
+credentials/

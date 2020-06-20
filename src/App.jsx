@@ -522,8 +522,8 @@ class App extends React.Component {
       <Navbar bg="dark" variant="dark">
         <Nav className="mr-auto">
           <NavLink exact className="nav-link" to="/">Conversation</NavLink>
-          <NavLink className="nav-link" to="/mic">Mic Settings</NavLink>
-          <NavLink className="nav-link" to="/speech">Speech Settings</NavLink>
+          <NavLink className="nav-link" to="/mic">Mic</NavLink>
+          <NavLink className="nav-link" to="/speech">Speech</NavLink>
        </Nav>
         <Form inline>
           <Button
@@ -532,7 +532,7 @@ class App extends React.Component {
           >
             <span className={this.state.isSpeaking ? "spinner-grow spinner-grow-sm" : ""} role="status" aria-hidden="true"/>
 
-            {this.state.isRecording ? "Stop Recording" : "Start Recording"}
+            {this.state.isRecording ? "Stop" : "Start"}
 
           </Button>
           <Image src={this.state.profile.imageUrl} roundedCircle className="ml-2" style={{height:"2.4rem"}}/>
