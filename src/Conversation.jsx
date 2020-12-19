@@ -23,15 +23,18 @@ class Conversation extends React.Component {
   }
 
   render() {
-    console.log("Conversation clients", this.props.clients);
     return <div className="main-content flex-grow-1 bg-dark text-white">
       {this.props.results.length === 0
         ? (!this.props.isRecording ? "Press Start recording and speak ..." : "")
         : (// all messages except the last one
-        this.props.results.map((r, i) => (
-          <div key={i} ref={this.lastSpanRef} className={!r.result.isFinal ? "msg-interim" : "msg-final"}>
-            <b>{this.props.clients.get(r.clientId).given_name} : </b>
-            <span className="conversation">{r.result.alternatives[0].transcript}</span>
+        Array.from(this.props.results.entries()).map(([key, rMap]) => (
+          <div key={key} ref={this.lastSpanRef} >
+            <b>{this.props.clients.get(rMap.values().next().value.clientId).given_name} : </b>
+            {Array.from(rMap.entries()).map(([key2, r]) => 
+              <span key={key2} className={!r.isFinal ? "msg-interim conversation" : "msg-final conversation"}>
+                {r.result.alternatives[0].transcript}
+              </span>
+            )}
           </div>))
         )}
     </div>

@@ -2,9 +2,7 @@ import React from 'react';
 import { Button, Image, Navbar, Nav, Form} from 'react-bootstrap';
 import './App.css';
 import { BrowserRouter as Router, Route, NavLink } from "react-router-dom";
-import MicSettings from './MicSettings'
 import Conversation from './Conversation'
-import SpeechSettings from './SpeechSettings'
 import Harker from './Harker'
 
 // https://medium.com/@bryanjenningz/how-to-record-and-play-audio-in-javascript-faa1b2b3e49b
@@ -31,35 +29,35 @@ class App extends React.Component {
       devices:[],
       selectedDevice: "default",
       audioChunks:[],
-      results:[],
       clients: new Map(),
       icons: new Map(),
-      interim: new Map(),
+      results: new Map(),
+      streamId: 0,
+      provider: 'gcloud', // can be 'aws' also
 
-      useOpus: false,
       ws: null,
-      phrases:[],
-      phrasesChanged: false,
 
       idToken: null,
       profile: {},
-
-      fftSize: 32,
-      minDecibels: -50,
-      maxDecibels: -30,
-      smoothingTimeConstant: 0.85,
-
     };
-    this.dataAvailable = this.dataAvailable.bind(this);
-    this.textDataAvailable = this.textDataAvailable.bind(this);
-    this.startRec = this.startRec.bind(this);
-    this.stopRec = this.stopRec.bind(this);
+  }
 
-    this.startRec2 = this.startRec2.bind(this);
-    this.stopRec2 = this.stopRec2.bind(this);
-    this.dataAvailable2 = this.dataAvailable2.bind(this);
 
-    this.micSettings = React.createRef();
+  setResult(result) {
+    const results = new Map(this.state.results); // clone the results
+    const key = "" + result.clientId + "_" + result.streamId;
+    // If we are about to insert a new result, delete the oldest, if we have exceeded max size
+    if (!results.has(key) && results.size > 1000) {
+      const firstKey = results.values().next;
+      results.delete(firstKey);
+    }
+
+    const resultMap = results.has(key) ? new Map(results.get(key)) : new Map();
+    results.set(key, resultMap);
+
+    resultMap.set(result.startTime, result);
+    console.log("setResult", result);
+    this.setState({results});
   }
 
   wsConnect() {
@@ -86,41 +84,29 @@ class App extends React.Component {
           cmd.clients.forEach(client => clients.set(client.clientId, client.openIdToken));
           const icons = new Map();
           cmd.clients.forEach(client => icons.set(client.openIdToken.given_name, client.openIdToken.picture));
-          console.log("client Map", clients);
-          console.log("icons Map", icons);
+  
           return {clientId: cmd.clientId, clients: clients, icons:icons}
         });
       }
-      // Is the message about the phrases  ?
-      else if (cmd.oper === "phrases") {
-        this.setState({phrases: cmd.phrases ? cmd.phrases : []});
-      }
+  
       // Is the message about the transcription of one client ?
       else if (cmd.oper === "result") {
-        const result = cmd.result;
-
-        this.setState(state => {
-
-          const interim = new Map(this.state.interim); // clone the interim
-          const results = this.state.results.slice(); // clone the results
-
-          // If we don't have a result entry for storing interim result create one
-          if (!interim.has(cmd.clientId)) {
-            interim.set(cmd.clientId, results.length);
-            results.push({clientId: cmd.clientId});
-          }
-
-          // save the results whether it is interim or final into this array
-          results[interim.get(cmd.clientId)] = {clientId: cmd.clientId, result: result.results[0]};
-
-          // if this is a final result, clear out the interim index for this client
-          // Is this an interim result
-          if (result.results[0].isFinal) {
-            interim.delete(cmd.clientId);
-          }
-          return { interim: interim, results: results };
-        });
-
+        if (cmd.provider === "aws") {
+          // aws's return object is very similar to aws, but it uses capital Alternatives, and capital Transscript
+          // change them to lowercase
+          cmd.result.alternatives = cmd.result.Alternatives;
+          cmd.result.alternatives.forEach(alt => {
+            alt.transcript = alt.Transcript;
+          })
+          this.setResult({clientId: cmd.clientId, streamId: cmd.streamId, 
+            startTime:cmd.result.StartTime,
+            result: cmd.result, isFinal:!cmd.result.IsPartial});
+        } else {
+          this.setResult({clientId: cmd.clientId, streamId: cmd.streamId, 
+            startTime:cmd.result.startTime,
+            result: cmd.result, isFinal:cmd.result.isFinal});
+        }
+       
       }
       else if (cmd.oper === "pong") {
         console.log("Got pong reply from server");
@@ -145,160 +131,38 @@ class App extends React.Component {
     this.setState({[propName]: value});
   }
 
-  textDataAvailable(event) {
-      console.log('Message from server ', event.data);
-  }
-
-  dataAvailable(event) {
-    console.log("dataAvailable", event.data);
-    this.setState(state => ({
-      audioChunks: [...state.audioChunks, event.data]
-    }));
-  }
-
-  dataAvailable2(data) {
-    console.log("dataAvailable", data);
-    this.setState(state => ({
-      audioChunks: [...state.audioChunks, data]
-    }));
-  }
-
-
-  // recording with WebAudio  MediaRecorder
-  startRec() {
-    // sampling Rate doesn't work when using audio/webm; codecs=opus
-    //const audioCtx = new AudioContext({sampleRate: 16000});
-    navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(stream => {
-      //const source = audioCtx.createMediaStreamSource(stream);
-      //const dest = audioCtx.createMediaStreamDestination();
-      //source.connect(dest);
-
-      console.log("stream.tracks", stream.getTracks());
-      // Chrome only supports audio/webm  with codecs=opus or codecs=pcm
-      // Firefox suppors  audio/webm and audio/ogg
-      // See https://stackoverflow.com/questions/41739837/all-mime-types-supported-by-mediarecorder-in-firefox-and-chrome
-      //const mediaRecorder = new MediaRecorder(stream, {mimeType:"audio/webm; codecs=pcm" });
-      //const mediaRecorder = new MediaRecorder(dest.stream, {mimeType:"audio/webm; codecs=opus" });
-      const mediaRecorder = new MediaRecorder(stream, {mimeType:"audio/webm; codecs=opus" });
-
-      // use timeSlice of 100ms
-      //mediaRecorder.start(100);
-      mediaRecorder.start();
-      this.setState({mediaRecorder, stream, audioChunks:[], isRecording:true});
-
-      mediaRecorder.addEventListener("dataavailable", this.dataAvailable);
-    }); 
-  }
-
-  stopRec() {
-    this.state.mediaRecorder.stop();
-    this.state.stream.getTracks().forEach(track => track.stop());
-    this.setState({isRecording:false});
-    // Wait for a little bit before sending the data
-    setTimeout(() => {
-      // Blob constructor doesn't do any encoding, does it?
-      //const blob = new Blob(this.state.audioChunks, { type : 'audio/ogg; codecs=opus' });
-     //const blob = new Blob(this.state.audioChunks, { type : 'audio/mpeg-3' });
-     console.log("audioChunks", this.state.audioChunks);
-     const blob = new Blob(this.state.audioChunks, { type : 'audio/webm' });
-     console.log("sending to backend", blob);
-     this.state.ws.send(blob);
-    }, 10);
-  }
-
-  // Recording with MediaRecorder opus-recorder which is webasm of libopus
-  startRec2() {
-      const s = window.Recorder.isRecordingSupported();
-      console.log("Supported ", s);
-      const mediaRecorder = new window.Recorder({
-        numberOfChannels:1,
-        encoderSampleRate:48000,
-        originalSampleRateOverride:48000,
-        encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
-        //streamPages: true,
-
-      });
-      console.log("mediaRecorder", mediaRecorder);
-
-      mediaRecorder.start();
-      mediaRecorder.ondataavailable = this.dataAvailable2;
-      mediaRecorder.onstart = () => {
-        console.log("Recording is started");
-      };
-      mediaRecorder.onstop = () => {
-        console.log("Recording is stopped");
-      };
-      mediaRecorder.onstreamerror = (e) => {
-        console.error("Err encountered", e);
-      };
-      //mediaRecorder.ondataavailable = (typedArray) => {
-      //  console.log("ondataavailable", typedArray);
-      //}
-      this.setState({mediaRecorder, audioChunks:[], isRecording:true});
-  }
-
-  stopRec2() {
-    this.state.mediaRecorder.stop();
-    this.setState({isRecording:false});
-    setTimeout(() => {
-      // Blob constructor doesn't do any encoding, does it?
-      //const blob = new Blob(this.state.audioChunks, { type : 'audio/ogg; codecs=opus' });
-     //const blob = new Blob(this.state.audioChunks, { type : 'audio/mpeg-3' });
-     console.log("audioChunks", this.state.audioChunks);
-     const blob = new Blob(this.state.audioChunks, { type : 'audio/webm' });
-     console.log("sending to backend", blob);
-     this.state.ws.send(blob);
-    }, 10);
-  }
-
   startSpeech() {
-    if (this.state.useOpus) {
-      this.opusRecorder.start();
-      this.opusRecorder.ondataavailable = (data) => {
-        console.log("sending data " , data);
-        if (this.state.ws) {
-          this.state.ws.send(data);
-        }
-      };
-      this.opusRecorder.onstart = () => {
-        console.log("OpusRecording is started");
-      };
-      this.opusRecorder.onstop = () => {
-        console.log("OpusRecording is stopped");
-      };
-      this.opusRecorder.onstreamerror = (e) => {
-        console.log("OpusRecoding Err encountered", e);
-      };
-    }
     this.chunkIndex = 0;
-    const cmd = {oper:"start", useOpus:this.state.useOpus};
+    const streamId = this.state.streamId + 1;
+    const cmd = {oper:"start", streamId, provider:this.state.provider};
     if (this.state.ws) {
       this.state.ws.send(JSON.stringify(cmd));
-      if (!this.state.useOpus) {
-        this.skippedBuffers.forEach(buf => {
-          console.log("sending (lastBuffer) data " , this.chunkIndex++);
-          this.state.ws.send(buf);
-        });
-        // clear out the skipped buffers
-        this.skippedBuffers = [];
-      }
+      
+      this.skippedBuffers.forEach(buf => {
+        console.log("sending (lastBuffer) data " , this.chunkIndex++);
+        this.state.ws.send(buf);
+      });
+      // clear out the skipped buffers
+      this.skippedBuffers = [];
+
     }
     this.isSpeaking = true;
-    this.setState({isSpeaking: true});
+    this.setState({isSpeaking: true, streamId});
   }
 
   stopSpeech() {
-    this.isSpeaking = false;
-    if (this.state.useOpus) {
-      this.opusRecorder.stop();
+    if (!this.isSpeaking) {
+      // already stopped
+      return;
     }
+    this.isSpeaking = false;
     // tell the backend we are ending, then close the connection
-    const cmd = {oper:"end"};
+    const cmd = {oper:"end", streamId:this.state.streamId};
     if (this.state.ws) {
       this.state.ws.send(JSON.stringify(cmd));
     }
-    this.setState({isSpeaking: false});
+    // Set Speaking to false, and increment streamId
+    this.setState(state => ({isSpeaking: false}));
 
   }
 
@@ -308,145 +172,74 @@ class App extends React.Component {
 
   // Recording to analyser node
   startRec3() {
-    this.audioCtx = new AudioContext({sampleRate: this.state.useOpus ? 48000 : 16000});
-    //const audioCtx = new AudioContext();
-    this.analyser = this.audioCtx.createAnalyser();
-    this.analyser.fftSize = this.state.fftSize;
-    this.analyser.minDecibels = this.state.minDecibels;
-    this.analyser.maxDecibels = this.state.maxDecibels;
-    this.analyser.smoothingTimeConstant = this.state.smoothingTimeConstant;
-
+    this.audioCtx = new AudioContext({sampleRate: 16000});
     this.skippedBuffers = [];
-
     this.chunkIndex = 0;
 
-    // Create a line delay to give time to speech detection
-    //this.lineDelay = audioCtx.createDelay(3);
+    this.scriptProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
 
-    if (this.state.useOpus) {
-      const s = window.Recorder.isRecordingSupported();
-      console.log("Opus Supported ", s);
-
-      this.opusRecorder = new window.Recorder({
-        numberOfChannels:1,
-        encoderPath: "/opus-recorder/dist/encoderWorker.min.js",
-        streamPages: true,
-        encoderSampleRate:48000,
-        originalSampleRateOverride: 48000,
-      });
-
-    }
-    else {
-      this.scriptProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
-
-    }
-
-    //console.log("selectedDevice", this.state.selectedDevice);
+    console.log("selectedDevice", this.state.selectedDevice);
     navigator.mediaDevices.getUserMedia({ audio:{ deviceId:this.state.selectedDevice} })
     .then(stream => {
       this.stream = stream;
       //console.log("Number of tracks", stream.getTracks().length);
       // create a source from the selected microphone
       this.source = this.audioCtx.createMediaStreamSource(this.stream);
+      this.source.connect(this.scriptProcessor);
 
-      // connect the source to the analyser and to the destination
-      this.source.connect(this.analyser);
+      this.scriptProcessor.connect(this.audioCtx.destination);
+      this.scriptProcessor.onaudioprocess = (event) => {
 
-      if (this.state.useOpus) {
-      } else {
-        //source.connect(this.lineDelay);
-        //this.lineDelay.connect(this.scriptProcessor)
-        this.source.connect(this.scriptProcessor);
+        // we're only using one audio channel here...
+        let leftChannel = event.inputBuffer.getChannelData(0);
 
-        this.scriptProcessor.connect(this.audioCtx.destination);
-        this.scriptProcessor.onaudioprocess = (event) => {
-
-          // we're only using one audio channel here...
-          let leftChannel = event.inputBuffer.getChannelData(0);
-
-          // Harker speech detection require is set to 50ms, so we need to buffer 100ms of speech.
-          // at 16K sample rate, we need to keep 1600 samples ,
-          // since we used a buffer size of 2048, just one additional buffer is fine
-          const data = this.convertFloat32ToInt16(leftChannel);
-          if (this.state.ws && this.isSpeaking) {
-            console.log("sending data ", this.chunkIndex++);
-            this.state.ws.send(data);
-          } else {
-            // Accumulate 8 buffers , each buffer is of size 2048, i.e. 2048/16000 of a second  i.e 128ms
-            // so we keep last 1 second before voice detection.
-            if (this.skippedBuffers.length > 8) {
-              this.skippedBuffers.shift();
-            }
-            this.skippedBuffers.push(data);
-
+        // Harker speech detection require is set to 50ms, so we need to buffer 100ms of speech.
+        // at 16K sample rate, we need to keep 1600 samples ,
+        // since we used a buffer size of 2048, just one additional buffer is fine
+        const data = this.convertFloat32ToInt16(leftChannel);
+        if (this.state.ws && this.isSpeaking) {
+          console.log("sending data ", this.chunkIndex++);
+          this.state.ws.send(data);
+        } else {
+          // Accumulate 8 buffers , each buffer is of size 2048, i.e. 2048/16000 of a second  i.e 128ms
+          // so we keep last 1 second before voice detection.
+          if (this.skippedBuffers.length > 8) {
+            this.skippedBuffers.shift();
           }
-        };
+          this.skippedBuffers.push(data);
 
-      }
+        }
+      };
 
       this.harker = new Harker(this.audioCtx, this.source, this.stream, {});
       this.harker.on("speaking", () => this.startSpeech());
       this.harker.on("stopped_speaking", () => this.stopSpeech());
 
-
-      // create MediaRecorder at the destination
-      //const mediaRecorder = new MediaRecorder(stream, {mimeType:"audio/webm; codecs=pcm" });
-      //const dest = audioCtx.createMediaStreamDestination();
-      //source.connect(dest);
-      //const mediaRecorder = new MediaRecorder(dest.stream);
-      // use timeSlice of 100ms
-      //mediaRecorder.start(100);
-      //mediaRecorder.addEventListener("dataavailable", this.dataAvailable);
-
-      //const cmd = {oper:"start", useOpus:this.state.useOpus};
-      //this.wsConnect(cmd);
-
-      // Start the canvasAnimation if the micSettings tab is active
-      const comp = this.micSettings.current;
-      if (comp) {
-        comp.animReq =  window.requestAnimationFrame(comp.canvasDraw.bind(comp));
-      }
       this.setState({
         audioCtx: this.audioCtx,
         stream : this.stream,
-        analyser :this.analyser,
         harker:this.harker,
         isRecording:true});
 
     }); 
   }
 
-
-  savePhrases() {
-    this.state.ws.send(JSON.stringify({oper:"updatePhrases", phrases: this.state.phrases}))
-  }
-
   stopRec3() {
+    // tell the backend to stop speech recognition
+    this.stopSpeech();
 
     // Stop the harker
     this.state.harker.stop();
 
-    // Disconnect analyser
-    this.source.disconnect(this.analyser);
-
     // Disconnect scriptProcessor
-    if (this.state.useOpus) {
-    } else {
-      this.source.disconnect(this.scriptProcessor);
-      this.scriptProcessor.disconnect(this.audioCtx.destination);
-    }
+    this.source.disconnect(this.scriptProcessor);
+    this.scriptProcessor.disconnect(this.audioCtx.destination);
+
     this.audioCtx.close();
 
     // tell the microphone device to stop
     this.state.stream.getTracks().forEach(track => track.stop());
-    window.clearInterval(this.state.interval);
 
-    // tell the canvas animation to stop
-    const comp = this.micSettings.current;
-    console.log("comp", comp);
-    if (comp && comp.animReq) {
-      window.cancelAnimationFrame(comp.animReq);
-    }
     this.setState({isRecording:false});
   }
 
@@ -463,6 +256,7 @@ class App extends React.Component {
   }
 
   onSignIn(user) {
+    console.log("Signed in", user);
     const profile = user.getBasicProfile();
     this.setState({
       profile: {
@@ -481,9 +275,41 @@ class App extends React.Component {
     // Note: we never call wsDisconnect
   }
 
-  componentDidMount() {
-    console.log("rendering button");
+  onSignInFailure(error) {
+    console.err("Sign in failure");
+    console.err(error);
+  }
 
+  componentDidMount() {
+    console.log("rendering button here ");
+
+
+    
+    window.gapi.load('auth2', () => {
+      window.gapi.auth2.init({
+        client_id: '480181438061-hs781145qtaelkqmpvopfl68ovfuinsc.apps.googleusercontent.com',
+        cookiepolicy: 'single_host_origin',
+      })
+      .then((auth2) => {
+        console.log("Finished initializing auth2. SignedIn=", auth2.isSignedIn.get());
+
+        auth2.isSignedIn.listen((st) => {
+            console.log("Listener called with ", st);
+        });
+        window.gapi.signin2.render('my-signin2', {
+          'scope': 'profile email',
+          'width': 200,
+          'height': 50,
+          'theme': 'dark',
+          'onsuccess': this.onSignIn.bind(this),
+          'onfailure': this.onSignInFailure.bind(this),
+        });
+    
+      }, (error) => {
+        console.log("Error in initializing auth2", error)
+      })
+    })
+    
     /*
     window.gapi.load('auth2', function() {
       window.gapi.auth2.init({
@@ -503,18 +329,12 @@ class App extends React.Component {
       });
 
       */
-    window.gapi.signin2.render('my-signin2', {
-      'scope': 'profile email',
-      'width': 200,
-      'height': 50,
-      'theme': 'dark',
-      'onsuccess': this.onSignIn.bind(this)
-    });
-
+   
   }
 
   render() {
     if (!this.state.idToken) {
+      console.log("idToken not found, rendering signin button");
       return <div id="my-signin2"/>;
     }
     return (
@@ -522,11 +342,15 @@ class App extends React.Component {
       <Navbar bg="dark" variant="dark">
         <Nav className="mr-auto">
           <NavLink exact className="nav-link" to="/">Conversation</NavLink>
-          <NavLink className="nav-link" to="/mic">Mic</NavLink>
-          <NavLink className="nav-link" to="/speech">Speech</NavLink>
        </Nav>
+        
         <Form inline>
-          <Button
+          <Form.Control as="select" value={this.state.provider} 
+            onChange={e => this.setState({provider: e.target.value})}>
+            <option>gcloud</option>
+            <option>aws</option>
+          </Form.Control>
+          <Button className="ml-3"
             variant={this.state.isRecording ? "danger" : "success"}
             onClick={this.state.isRecording ? this.stopRec3.bind(this) : this.startRec3.bind(this)}
           >
@@ -545,30 +369,7 @@ class App extends React.Component {
           results={this.state.results}
         />
       )}/>
-      <Route path="/mic/"  render={routeProps => (
-        <MicSettings
-          ref={this.micSettings}
-          analyser={this.state.analyser}
-          isRecording={this.state.isRecording}
-          selectedDevice={this.state.selectedDevice}
-          fftSize={this.state.fftSize}
-          minDecibels={this.state.minDecibels}
-          maxDecibels={this.state.maxDecibels}
-          smoothingTimeConstant={this.state.smoothingTimeConstant}
-          setProp={this.setProp.bind(this)}
-        />
-      )}/>
-      <Route path="/speech/" render={routeProps => (
-        <SpeechSettings
-          phrases={this.state.phrases}
-          phrasesChanged={this.state.phrasesChanged}
-          updatePhrases={phrases => this.setState({phrases: phrases, phrasesChanged: true})}
-          savePhrases={() => {
-            this.savePhrases();
-            this.setState({phrasesChanged: false})
-          }}
-        />
-      )}/>
+  
       <div className="bg-dark">
         <span className="text-white">
           Connected:

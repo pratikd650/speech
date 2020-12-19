@@ -8,34 +8,25 @@ const WebSocket = require('ws');
 
 const client = new speech.SpeechClient();
 const fs = require('fs');
+const log = require('./util.js').log;
+const logErr = require('./util.js').logErr;
+let phrases = ["Sachi", "Shrey"];
 
 class Stream {
-  /**
-   *
-   * @param ws - the websocket client object - one created for each connection
-   * @param wss - the websocket server object - there is only one server object
-   */
-  constructor(ws, wss) {
-    this.recognizeStream = null;
-    this.ws = ws; // store the websocket so we can send back results
-    this.wss = wss; // use it to get a list of all client
-    this.startStream = this.startStream.bind(this);
-    this.speechCallback = this.speechCallback.bind(this);
-    console.log("Creating speech stream");
-  }
-
-  getRecognizeStream() {
-     return this.recognizeStream;
-  }
-
-
 
   /*
       // convert raw pcm to wav file
       ffmpeg -f s16le -ar 16000 -ac 1 -i /tmp/audio /tmp/output.wav
 
    */
-  startStream(useOpus, phrases) {
+  constructor(speechCallback, clientId, streamId) {
+    console.log("in gcloud");
+    const useOpus = false;
+    this.clientId = clientId;
+    this.streamId = streamId;
+    this.startTime = 0;
+    this.isOpen = true;
+
     const config = {
       encoding: useOpus ? 'OGG_OPUS' : 'LINEAR16',
       sampleRateHertz: useOpus ? 48000 : 16000,
@@ -49,79 +40,65 @@ class Stream {
       interimResults: true,
     };
 
-    //this.fd = fs.openSync("/tmp/audio", "w");
+    this.fd = fs.openSync("/tmp/audio", "w");
 
-    this.ws.my_log("INFO", "Starting recognize stream");
+    log("gcloud: Starting recognize stream", streamId);
 
     // Clear current audioInput
     // Initiate (Reinitiate) a recognize stream
     this.recognizeStream = client
       .streamingRecognize(request)
       .on('error', err => {
-        this.ws.my_log("ERROR", 'API request error ', err);
+        logErr('gcloud: API request error ', streamId, err);
         if (err.code === 11) {
           // restartStream();
         } else {
-          this.ws.my_log("ERROR", 'API request error ', err);
+          logErr('gcloud: API request error ', streamId, err);
         }
       })
-      .on('data', this.speechCallback);
+      .on('data', data => {
+        if (data.results && data.results.length > 0
+          && data.results[0].alternatives && data.results[0].alternatives.length > 0) {
+          log("gcloud got data ", streamId, this.startTime, data.results[0].alternatives[0].transcript);
+          const r = data.results[0];
+          r.startTime = this.startTime;
+          if (r.isFinal) {
+            this.startTime = r.resultEndTime.seconds + r.resultEndTime.nanos/1000000000;
+            log("gcloud. setting startTime to", streamId, r.resultEndTime, this.startTime)
+          }
+          speechCallback(r)
+        } else {
+          log("gcloud got data ", data)
+        }
+        
+      });
+
+   
     
   }
   
   endStream() {
-    if (this.recognizeStream) {
-
-      this.ws.my_log("INFO", "Closing recognize stream");
-
+    if (this.isOpen) {
+      log("gcloud: Closing recognize stream", this.streamId);
       this.recognizeStream.end();
-
-      // Null out and create a copy of the recognize stream,
-      // the original stream cannot be written to any more
-      // however this stream may be still replying
-      const recognizeStream1 = this.recognizeStream;
-      this.recognizeStream = null;
-      //const fd1 = this.fd;
-
-      //fs.closeSync(fd1);
-
-      // after ending the stream, the server may be still replying back, wait for 2 seconds
-      setTimeout(() => recognizeStream1.removeListener('data', this.speechCallback), 2000);
-
-      /*
-      // DOn't remove this listener
-      // remove the speechCallback listener after 1 second
-      setTimeout(() => {
-        this.recognizeStream.removeListener('data', this.speechCallback);
-        this.recognizeStream = null;
-      }, 1000);
-
-       */
+      this.isOpen = false;
+      fs.closeSync(this.fd);
+    }
+    else {
+      logErr("gcloud: Trying to close already closed recognize stream ", this.streamId);
     }
   }
 
   write(message) {
-    if (this.recognizeStream) {
-      //fs.writeSync(this.fd, message);
+    //if (this.isOpen) {
+      log("gcloud: write buffer of size", message.length, this.streamId)
+      fs.writeSync(this.fd, message);
       this.recognizeStream.write(message);
-    } else {
-      this.ws.my_log("ERROR", "got buffer of size ", message, " after recognize Stream was closed")
-    }
+    //} else {
+    //  this.pendingBuf.push(message);
+    //  log("gcloud: pending write buffer of size ", message.length);
+    //}
   }
-
-  speechCallback(data)  {
-    const cmd = {
-      oper:"result",
-      clientId: this.ws.my_clientId,
-      result: data,
-    };
-    // Send trasncription data to all clients
-    this.wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(cmd));
-      }
-    });
-  };
   
 }
 
