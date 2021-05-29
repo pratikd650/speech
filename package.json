@@ -17,7 +17,7 @@
     "react-router-dom": "^5.1.2",
     "react-scripts": "^3.4.3",
     "sqlite3": "^4.1.0",
-    "ws": "^7.2.0"
+    "ws": "^7.4.6"
   },
   "proxy": "http://localhost:8080",
   "scripts": {
