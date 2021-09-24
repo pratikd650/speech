@@ -34,7 +34,7 @@ class App extends React.Component {
       results: new Map(),
       streamId: 0,
       provider: 'gcloud', // can be 'aws' also
-
+      
       ws: null,
 
       idToken: null,
@@ -118,6 +118,8 @@ class App extends React.Component {
       ws.send(JSON.stringify({oper:"ping"}));
       console.log("Sending ping");
     }, 20000);
+    
+   
   }
 
   wsDisconnect() {
@@ -221,6 +223,8 @@ class App extends React.Component {
         harker:this.harker,
         isRecording:true});
 
+      // If focus shifts away from the window, then stop recording
+      window.onblur = (e) => this.stopRec3();
     }); 
   }
 
@@ -241,6 +245,9 @@ class App extends React.Component {
     this.state.stream.getTracks().forEach(track => track.stop());
 
     this.setState({isRecording:false});
+
+    // remove the global onblur handler
+    window.onblur = undefined;
   }
 
 
@@ -282,8 +289,6 @@ class App extends React.Component {
 
   componentDidMount() {
     console.log("rendering button here ");
-
-
     
     window.gapi.load('auth2', () => {
       window.gapi.auth2.init({
@@ -310,6 +315,10 @@ class App extends React.Component {
       })
     })
     
+    navigator.mediaDevices.enumerateDevices().then(allDevices =>
+      this.setState({devices: allDevices.filter(d => d.kind === "audioinput")})
+    );
+
     /*
     window.gapi.load('auth2', function() {
       window.gapi.auth2.init({
@@ -337,6 +346,8 @@ class App extends React.Component {
       console.log("idToken not found, rendering signin button");
       return <div id="my-signin2"/>;
     }
+    const deviceOptions = this.state.devices
+      .map(device => <option value={device.id}>{device.label} </option>);
     return (
     <Router>
       <Navbar bg="dark" variant="dark">
@@ -345,10 +356,14 @@ class App extends React.Component {
        </Nav>
         
         <Form inline>
-          <Form.Control as="select" value={this.state.provider} 
+         <Form.Control as="select" value={this.state.provider} 
             onChange={e => this.setState({provider: e.target.value})}>
             <option>gcloud</option>
             <option>aws</option>
+          </Form.Control>
+          <Form.Control className="ml-3" as="select" value={this.state.selectedDevice} 
+            onChange={e => this.setState({selectedDevice: e.target.value})}>
+            {deviceOptions}
           </Form.Control>
           <Button className="ml-3"
             variant={this.state.isRecording ? "danger" : "success"}
