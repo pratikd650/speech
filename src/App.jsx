@@ -45,7 +45,7 @@ class App extends React.Component {
 
   setResult(result) {
     const results = new Map(this.state.results); // clone the results
-    const key = "" + result.clientId + "_" + result.streamId;
+    const key = "" + result.clientId + "_" + result.streamId + "_" + result.restartCounter;
     // If we are about to insert a new result, delete the oldest, if we have exceeded max size
     if (!results.has(key) && results.size > 1000) {
       const firstKey = results.values().next;

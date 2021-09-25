@@ -118,7 +118,7 @@ class Stream {
       .on('data', data => {
         if (data.results && data.results.length > 0
           && data.results[0].alternatives && data.results[0].alternatives.length > 0) {
-          log("gcloud got data ", this.streamId, 
+          log("gcloud got data ", this.streamId, this.restartCounter, 
             "startTime:", this.startTime, "transcript:", data.results[0].alternatives[0].transcript);
           const r = data.results[0];
           r.startTime = this.restartTime + this.startTime;
@@ -126,13 +126,14 @@ class Stream {
           this.resultEndTime = +r.resultEndTime.seconds +  // Use unary + to convert to number
             Math.round(r.resultEndTime.nanos / 1_000_000) / 1000; // round to milliseconds
           r.endTime = this.restartTime + this.resutlEndTime;
+          r.restartCounter = this.restartCounter;
 
           if (r.isFinal) {
             this.lastTranscriptWasFinal = true;
             this.finalEndTime = this.resultEndTime;
             this.startTime = this.resultEndTime;
-            log("gcloud. setting startTime ", this.streamId, 
-              "restartTime:", this.restartTime, "endTime:", this.endTime, "startTime:", this.startTime);
+            log("gcloud data  was final ", this.streamId, this.restartCounter,
+              "restartTime:", this.restartTime, "endTime:", r.endTime, "new startTime:", this.startTime);
           } else {
             this.lastTranscriptWasFinal = false;
           }
