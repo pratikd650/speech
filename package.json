@@ -8,7 +8,7 @@
     "bootstrap": "^4.6.0",
     "crc-32": "^1.2.0",
     "dateformat": "^3.0.3",
-    "express": "^4.17.1",
+    "express": "^4.17.3",
     "google-auth-library": "^7.9.2",
     "npm-check-updates": "^11.8.5",
     "opus-recorder": "^6.2.0",
